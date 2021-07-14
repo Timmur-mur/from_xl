@@ -1,6 +1,9 @@
 
 import openpyxl
-from dabase import session, Urls
+from dabase import Database
+import re
+
+
 
 class ReadURLfromfile:
 
@@ -12,71 +15,65 @@ class ReadURLfromfile:
         i=1
         book = openpyxl.open(self.file, read_only=True)
         sheet = book.active
-        for row in range(2, sheet.max_row): #
-            url = sheet[row][0].value
-            yield url
+        for  row in sheet.rows:
+            for index, line in enumerate(row):
+                if index == 0:
+                    yield line.value
         book.close()
 
 
 class CleanedHttp:
 
-    def __init__(self, obj_red_url):
+    pattern = re.compile(r'^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?')
+
+    def __init__(self, obj_red_url, comment, db):
         
         self.urls = obj_red_url
         self.url_set = set()
+        self.comment = comment
+        self.db = db
+
 
     def clining(self):
+        table = self.db.get_table('site')
         read = self.urls.read()
         url = next(read)
         flag = True
         while flag:
+            new_url = self.pattern.search(url)
+            if new_url:
+                result = new_url.group().split('//')
+                if len(result) == 2:
+                    result = result[1].strip('/"')
+                    self.url_set.add(result)
+                    
+                    if len(self.url_set) == 100:
+                        resual_list = []
+                        for url in self.url_set:
+                            print(url)
+                            resual_list.append(dict(url=url, comment=self.comment))
+                        self.db.upsert(table, resual_list)
+                        self.url_set.clear()
+                        print('значение пустого set', self.url_set)
             
-            self.url_set.add(url.split('//')[1].strip('/"'))
-            if len(self.url_set) == 100:
-                base = WriteBase(self.url_set, 'internet shops')
-                base.write() 
-                self.url_set.clear()
             try:
                 url = next(read)
             except:
-                flag = False      
-        print(self.url_set)
+                flag = False
+                resual_list = []
+                for url in self.url_set:
+                    resual_list.append(dict(url=url, comment=self.comment))
+                self.db.upsert(table, resual_list)
+                self.db.disconnect()
 
-
-
-
-
-
-class WriteBase:
-
-    def __init__(self, urls, comment):
-        self.urls = urls
-        self.comment = comment
-
-    def write(self):
-        for url in self.urls:
-            url_new = Urls(url=url, comment=self.comment)
-            session.add(url_new)
-            try:
-                session.commit()
-                print('записали: ', url)
-            except:
-                session.rollback()
-                continue
-        session.close()
- 
-                #print('тут вставить код для записи транзакции в базу',tr_url)
-           
-
-
-
-# надо дописать код работы с алхимией, что бы можно было с ней использовать транзакцию
-
+      
 
 if __name__ == '__main__':
-    newurl = ReadURLfromfile('/home/timur/urls/allonlineshopsfree.xlsx') # объект в который считывается содержимое csv
+    db = Database()
+    db.connect()
+    newurl = ReadURLfromfile('/home/timur/urls/jewelry_manufacturers.xlsm') # объект в который считывается содержимое csv
     newurl
-    clined_url = CleanedHttp(newurl)
+    clined_url = CleanedHttp(newurl, comment='ювелирные производители', db=db)
     clined_url.clining()
     #base_ob = WriteBase(clined_url.new_urls, comment = 'интернет магазины')
     #base_ob.write()
